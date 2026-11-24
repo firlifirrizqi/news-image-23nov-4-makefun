@@ -41,6 +41,23 @@ const height = png.readUInt32BE(20);
 if (width > 1024 || height > 1024) {
   throw new Error(`entry.png is too large: ${width}x${height}`);
 }
+
+// The competition wants a whole 1024 by 1024 image, so the width and
+// height must be exactly 1024, not merely at most 1024.
+if (width !== 1024 || height !== 1024) {
+  throw new Error(`entry.png must be 1024x1024, got ${width}x${height}`);
+}
+
+// The IHDR chunk stores the bit depth at offset 24 and the colour type
+// at offset 25. This entry is an 8-bit truecolour (RGB) image, so the
+// depth must be 8 and the colour type must be 2.
+const bitDepth = png[24];
+const colourType = png[25];
+if (bitDepth !== 8 || colourType !== 2) {
+  throw new Error(
+    `entry.png must be 8-bit RGB, got depth ${bitDepth} colour ${colourType}`,
+  );
+}
 if (png.length > 1048576) {
   throw new Error(`entry.png is over 1 MiB: ${png.length} bytes`);
 }
@@ -52,6 +69,22 @@ const IEND = Buffer.from([
 ]);
 if (!png.subarray(-12).equals(IEND)) {
   throw new Error("entry.png is truncated: missing IEND chunk");
+}
+
+// The image data lives in one or more IDAT chunks. Walk the chunk chain
+// after IHDR and require at least one IDAT chunk before IEND; a file
+// with no IDAT chunk carries no pixels at all.
+let offset = 33;
+let foundIdat = false;
+while (offset + 8 <= png.length) {
+  const length = png.readUInt32BE(offset);
+  const type = png.subarray(offset + 4, offset + 8).toString("ascii");
+  if (type === "IDAT") foundIdat = true;
+  if (type === "IEND") break;
+  offset += 12 + length;
+}
+if (!foundIdat) {
+  throw new Error("entry.png has no IDAT chunk: no image data");
 }
 
 mkdirSync(OUT_DIR, { recursive: true });
